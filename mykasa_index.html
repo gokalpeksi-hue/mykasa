@@ -286,6 +286,15 @@
 <div class="modal" id="bkModal">
   <div class="sheet">
     <div class="grab"></div>
+    <div class="field" style="margin-bottom:10px">
+      <label>Senkron kodu (iki cihazda aynısını yaz)</label>
+      <input type="text" id="syncCode" placeholder="örn. gokalp-kasa-2026" autocapitalize="off" autocomplete="off">
+    </div>
+    <div class="btnrow" style="margin-top:0">
+      <button class="btn btn-primary" id="syncPush">⬆ Buluta yedekle</button>
+      <button class="btn btn-ghost" id="syncPull">⬇ Buluttan getir</button>
+    </div>
+    <div id="syncSt" style="font-size:12px;color:var(--muted);margin:8px 2px 14px;line-height:1.5"></div>
     <div class="menulist">
       <button id="bkExport"><span>⬇️</span><div><div>Yedeği indir</div><div class="sub">Tüm kayıtlar + fişler tek dosya (Drive'a yükleyebilirsin)</div></div></button>
       <button id="bkImport"><span>⬆️</span><div><div>Geri yükle</div><div class="sub">Drive'dan/telefondan yedek dosyası seç</div></div></button>
@@ -317,7 +326,9 @@ let tab='islemler';
 let edit=null, mKind='gider', mType=null, mImg=undefined; // mImg: undefined=değişmedi, null=silindi, string=yeni
 
 function load(){try{return JSON.parse(localStorage.getItem(LS))||[]}catch(e){return[]}}
-function save(){localStorage.setItem(LS,JSON.stringify(entries))}
+function save(){localStorage.setItem(LS,JSON.stringify(entries));scheduleSync()}
+let dels=(function(){try{return JSON.parse(localStorage.getItem('mykasa_dels'))||{}}catch(e){return{}}})();
+function persistDels(){try{localStorage.setItem('mykasa_dels',JSON.stringify(dels))}catch(e){}}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 function fom(d){return new Date(d.getFullYear(),d.getMonth(),1)}
 function fmt(n){return n.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+' ₺'}
@@ -575,6 +586,7 @@ async function saveModal(){
 }
 async function deleteEntry(){
   if(!edit)return;if(!confirm('Bu kayıt silinsin mi?'))return;
+  dels[edit]=Date.now();persistDels();   // silme diğer cihaza da taşınsın
   await imgDel(edit);entries=entries.filter(x=>x.id!==edit);save();closeModal();render();
 }
 
@@ -601,6 +613,71 @@ function doImport(file){
   fr.readAsText(file);
 }
 function closeBk(){document.getElementById('bkModal').classList.remove('open')}
+
+/* ---- Bulut senkron (kod ile, MyCards gibi) ---- */
+let syncCode=localStorage.getItem('mykasa_sync_code')||'';
+let syncT=null,pushingKV=false;
+function kvKey(){return 'mykasa_'+syncCode.replace(/[^A-Za-z0-9_-]/g,'')}
+function scheduleSync(){if(!syncCode)return;clearTimeout(syncT);syncT=setTimeout(()=>kvPush(false),3000)}
+function syncStatus(){
+  const el=document.getElementById('syncSt');if(!el)return;
+  if(!syncCode){el.innerHTML='Kod belirlersen her değişiklik <b style="color:var(--accent2)">otomatik</b> buluta yedeklenir; diğer cihazda aynı kodu yazıp "Buluttan getir" ile güncellemeleri alırsın. İlk istekte sunucunun uyanması ~30 sn sürebilir.';return}
+  const t=Number(localStorage.getItem('mykasa_last_sync')||0);
+  el.innerHTML='<b style="color:var(--accent2)">Otomatik yedek açık</b> — kod: <b>'+syncCode+'</b>'+
+    (t?' • Son eşitleme: '+new Date(t).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'');
+}
+async function kvMerge(d){
+  const incDels=d.dels||{};let added=0,removed=0,changed=false;
+  for(const id in incDels){if(!dels[id]||dels[id]<incDels[id]){dels[id]=incDels[id];changed=true}}
+  const keep=[];
+  for(const t of entries){
+    const dt=dels[t.id];
+    if(dt&&dt>=(t.ts||0)){await imgDel(t.id);removed++;changed=true}
+    else keep.push(t);
+  }
+  entries=keep;
+  const have=new Set(entries.map(e=>e.id));
+  for(const t of (d.entries||[])){
+    const dt=dels[t.id];
+    if(dt&&dt>=(t.ts||0))continue;
+    if(!have.has(t.id)){
+      entries.push(t);have.add(t.id);added++;
+      if(d.images&&d.images[t.id])await imgPut(t.id,d.images[t.id]);
+    }
+  }
+  if(changed||added){persistDels();save()}
+  return{added,removed};
+}
+async function kvPush(manual){
+  if(!syncCode){if(manual)alert('Önce senkron kodu yaz');return}
+  if(pushingKV)return;pushingKV=true;
+  try{
+    const images=await imgAll();
+    const r=await fetch(API+'/api/kv/'+kvKey(),{method:'PUT',headers:{'content-type':'application/json'},
+      body:JSON.stringify({data:{app:'MyKasa',v:2,updatedAt:Date.now(),entries,images,dels}})});
+    if(!r.ok)throw 0;
+    localStorage.setItem('mykasa_last_sync',String(Date.now()));syncStatus();
+    if(manual)alert('Buluta yedeklendi ✓ ('+entries.length+' kayıt)');
+  }catch(e){
+    if(manual)alert('Yedeklenemedi — ilk istekte sunucu uyanıyor olabilir, 30 sn sonra tekrar dene');
+    else scheduleSync();
+  }finally{pushingKV=false}
+}
+async function kvPull(manual){
+  if(!syncCode){if(manual)alert('Önce senkron kodu yaz');return}
+  try{
+    const r=await fetch(API+'/api/kv/'+kvKey());
+    if(!r.ok)throw 0;
+    const j=await r.json();const d=j&&j.data;
+    if(!d||!Array.isArray(d.entries)){if(manual)alert('Bu kodla bulutta yedek yok — önce diğer cihazda "Buluta yedekle"');return}
+    const res=await kvMerge(d);
+    localStorage.setItem('mykasa_last_sync',String(Date.now()));
+    render();syncStatus();
+    if(manual)alert((res.added||res.removed)
+      ?('Eşitlendi ✓ '+res.added+' yeni kayıt'+(res.removed?', '+res.removed+' silinen':'')+'. Toplam '+entries.length+'.')
+      :'Zaten güncel ✓ ('+entries.length+' kayıt)');
+  }catch(e){if(manual)alert('Buluttan alınamadı — ilk istekte sunucu uyanıyor olabilir, 30 sn sonra tekrar dene')}
+}
 
 /* ---- Google Drive yedeği ---- */
 const GOOGLE_CLIENT_ID='93563620545-2jm0ajsd8qes1ou0dj5bsp5g0rs6t9qj.apps.googleusercontent.com';
@@ -699,7 +776,17 @@ document.getElementById('fCam').onchange=e=>onPhoto(e.target.files[0]);
 document.getElementById('fGal').onchange=e=>onPhoto(e.target.files[0]);
 document.getElementById('pThumb').onclick=()=>{const s=document.getElementById('pThumb').src;if(s){document.getElementById('imgViewImg').src=s;document.getElementById('imgView').classList.add('open')}};
 document.getElementById('imgView').onclick=()=>document.getElementById('imgView').classList.remove('open');
-document.getElementById('menuBtn').onclick=()=>document.getElementById('bkModal').classList.add('open');
+document.getElementById('menuBtn').onclick=()=>{syncStatus();document.getElementById('bkModal').classList.add('open')};
+document.getElementById('syncCode').value=syncCode;
+document.getElementById('syncCode').addEventListener('change',e=>{
+  syncCode=e.target.value.trim();
+  localStorage.setItem('mykasa_sync_code',syncCode);
+  syncStatus();
+  if(syncCode)scheduleSync();
+});
+document.getElementById('syncPush').onclick=()=>kvPush(true);
+document.getElementById('syncPull').onclick=()=>kvPull(true);
+if(syncCode)setTimeout(()=>kvPull(false),1200); // açılışta sessizce eşitle
 document.getElementById('bkCancel').onclick=closeBk;
 document.getElementById('bkModal').onclick=e=>{if(e.target.id==='bkModal')closeBk()};
 document.getElementById('bkExport').onclick=doExport;
