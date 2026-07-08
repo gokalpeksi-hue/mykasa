@@ -12,6 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="icon" type="image/png" href="icon-192.png">
 <title>MyKasa</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root{
     --bg:#0a1410; --card:#11201a; --card2:#183026; --line:#26443a;
@@ -81,8 +82,34 @@
   .sectitle{font-size:13px;font-weight:700;color:var(--muted);margin:20px 4px 11px;text-transform:uppercase;
     letter-spacing:.5px;display:flex;align-items:center;gap:8px}
   .sectitle .tot{margin-left:auto;color:var(--txt)}
-  .catrow{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:11px 13px;margin-bottom:8px}
+  /* Dağılım grafikleri */
+  .ptoggle{display:flex;gap:8px;margin:16px 0 4px}
+  .ptoggle button{flex:1;background:var(--card2);border:1px solid var(--line);color:var(--muted);
+    padding:9px 4px;border-radius:11px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit}
+  .ptoggle button.on{background:rgba(34,197,94,.16);color:var(--accent2);border-color:var(--accent)}
+  .pcard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-top:12px}
+  .pcard .pttl{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;
+    display:flex;gap:8px}
+  .pcard .pttl .plab{margin-left:auto;color:var(--txt);text-transform:none;letter-spacing:0}
+  .pierow{display:flex;align-items:center;gap:16px;margin-top:12px;flex-wrap:wrap}
+  .pierow svg{flex:none}
+  .plegend{flex:1;min-width:150px;display:flex;flex-direction:column;gap:7px}
+  .plrow{display:flex;align-items:center;gap:6px;font-size:12.5px}
+  .plrow i{width:11px;height:11px;border-radius:3px;flex:none}
+  .plrow .pn{font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .plrow .ppc{color:var(--muted);font-weight:700;flex:none}
+  .plrow .pam{font-variant-numeric:tabular-nums;font-weight:700;text-align:right;flex:none}
+  .pempty{color:var(--muted);font-size:13px;padding:14px 0 4px;text-align:center}
+  .catrow{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:11px 13px;margin-bottom:8px;cursor:pointer}
   .catrow .top{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600}
+  .catrow .top .cv{color:var(--muted);font-size:11px;transition:transform .18s;flex:none}
+  .catrow.open .top .cv{transform:rotate(180deg)}
+  .catdet{display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+  .catrow.open .catdet{display:block}
+  .catdet .drow{display:flex;gap:9px;font-size:12.5px;padding:4px 0;align-items:baseline}
+  .catdet .dd{color:var(--muted);flex:none;width:54px}
+  .catdet .dl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .catdet .da{font-variant-numeric:tabular-nums;font-weight:700;flex:none}
   .catrow .top .e{font-size:17px}
   .catrow .top .pc{margin-left:auto;color:var(--muted);font-size:12px;font-weight:600}
   .catrow .top .am{font-weight:800}
@@ -207,6 +234,14 @@
       <div class="bars" id="trendBars"></div>
       <div class="legend"><span><i style="background:#22c55e"></i>Gelir</span><span><i style="background:#f87171"></i>Gider</span></div>
     </div>
+    <div class="ptoggle" id="pieToggle">
+      <button data-p="gun">Günlük</button>
+      <button data-p="hafta">Haftalık</button>
+      <button data-p="ay" class="on">Aylık</button>
+      <button data-p="yil">Yıllık</button>
+    </div>
+    <div class="pcard"><div class="pttl">🔴 Gider Dağılımı<span class="plab" id="pieOutLab"></span></div><div id="pieOut"></div></div>
+    <div class="pcard"><div class="pttl">🟢 Gelir Dağılımı<span class="plab" id="pieInLab"></span></div><div id="pieIn"></div></div>
     <div id="catOut"></div>
     <div id="catIn"></div>
   </div>
@@ -259,9 +294,20 @@
 <div class="modal" id="bkModal">
   <div class="sheet">
     <div class="grab"></div>
+    <div class="field" style="margin-bottom:10px">
+      <label>Senkron kodu (iki cihazda aynısını yaz)</label>
+      <input type="text" id="syncCode" placeholder="örn. gokalp-kasa-2026" autocapitalize="off" autocomplete="off">
+    </div>
+    <div class="btnrow" style="margin-top:0">
+      <button class="btn btn-primary" id="syncPush">⬆ Buluta yedekle</button>
+      <button class="btn btn-ghost" id="syncPull">⬇ Buluttan getir</button>
+    </div>
+    <div id="syncSt" style="font-size:12px;color:var(--muted);margin:8px 2px 14px;line-height:1.5"></div>
     <div class="menulist">
       <button id="bkExport"><span>⬇️</span><div><div>Yedeği indir</div><div class="sub">Tüm kayıtlar + fişler tek dosya (Drive'a yükleyebilirsin)</div></div></button>
       <button id="bkImport"><span>⬆️</span><div><div>Geri yükle</div><div class="sub">Drive'dan/telefondan yedek dosyası seç</div></div></button>
+      <button id="bkDriveSave"><span>☁️</span><div><div>Drive'a yedekle</div><div class="sub">Tek dokunuşla Google Drive'a kaydeder (mykasa-yedek.json)</div></div></button>
+      <button id="bkDriveLoad"><span>📥</span><div><div>Drive'dan geri yükle</div><div class="sub">Drive'daki yedeği indirir ve geri yükler</div></div></button>
     </div>
     <div class="btnrow" style="margin-top:4px"><button class="btn btn-ghost" id="bkCancel">Kapat</button></div>
     <input type="file" id="fImport" accept="application/json,.json" hidden>
@@ -273,8 +319,8 @@
 <script>
 const API='https://urun-fiyat-takip.onrender.com';
 const LS='mykasa_v2';
-const GELIR_TYPES=[['Maaş','💼'],['Havale/EFT','🏦'],['Nakit','💵'],['Kira','🏠'],['Yatırım','📈'],['Diğer','➕']];
-const GIDER_TYPES=[['Havale','🏦'],['Bakkaliye','🛒'],['Cafe','☕'],['Restaurant','🍽️'],['Manav','🥬'],['Diğer','➖']];
+const GELIR_TYPES=[['Maaş','💼'],['Havale/EFT','🏦'],['Nakit','💵'],['Kira','🏠'],['Yatırım','📈'],['Prim','💰'],['Yemek Kartı','💳'],['Diğer','➕']];
+const GIDER_TYPES=[['Havale','🏦'],['Bakkaliye','🛒'],['Cafe','☕'],['Restaurant','🍽️'],['Manav','🥬'],['Bireysel İkram','🎁'],['Şirket Harcaması','🏢'],['Atıştırma','🍿'],['Diğer','➖']];
 const EMOJI=Object.fromEntries([...GELIR_TYPES,...GIDER_TYPES].map(([k,e])=>[k,e]));
 const MONTHS=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 const DAYS=['Pazar','Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'];
@@ -288,7 +334,9 @@ let tab='islemler';
 let edit=null, mKind='gider', mType=null, mImg=undefined; // mImg: undefined=değişmedi, null=silindi, string=yeni
 
 function load(){try{return JSON.parse(localStorage.getItem(LS))||[]}catch(e){return[]}}
-function save(){localStorage.setItem(LS,JSON.stringify(entries))}
+function save(){localStorage.setItem(LS,JSON.stringify(entries));scheduleSync()}
+let dels=(function(){try{return JSON.parse(localStorage.getItem('mykasa_dels'))||{}}catch(e){return{}}})();
+function persistDels(){try{localStorage.setItem('mykasa_dels',JSON.stringify(dels))}catch(e){}}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 function fom(d){return new Date(d.getFullYear(),d.getMonth(),1)}
 function fmt(n){return n.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+' ₺'}
@@ -378,7 +426,88 @@ function renderOzet(mt,inc,exp){
       </div><div class="mlbl">${MONTHS[x.d.getMonth()].slice(0,3)}</div></div>`}).join('');
   document.getElementById('catOut').innerHTML=catSection(mt,'gider',exp);
   document.getElementById('catIn').innerHTML=catSection(mt,'gelir',inc);
+  document.querySelectorAll('#catOut .catrow,#catIn .catrow').forEach(el=>{el.onclick=()=>el.classList.toggle('open')});
+  renderPies();
 }
+
+/* ---- Dağılım grafikleri (donut) ---- */
+let piePeriod='ay';
+const PIE_COLORS=['#3987e5','#199e70','#c98500','#008300','#9085e9','#e66767','#d55181','#d95926'];
+function pieColor(kind,type){
+  if(type==='Diğer')return '#8b9a91'; // "Diğer" her zaman nötr gri
+  const list=typesFor(kind).map(x=>x[0]).filter(t=>t!=='Diğer');
+  let i=list.indexOf(type); if(i<0)i=0;
+  return PIE_COLORS[i%PIE_COLORS.length];
+}
+function periodRange(){
+  const now=new Date();
+  if(piePeriod==='gun'){const s=ymd(now);return{label:'Bugün',test:d=>d===s}}
+  if(piePeriod==='hafta'){
+    const t=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+    const dow=(t.getDay()+6)%7;
+    const st=new Date(t);st.setDate(t.getDate()-dow);
+    const en=new Date(st);en.setDate(st.getDate()+6);
+    const s=ymd(st),e=ymd(en);
+    return{label:'Bu Hafta',test:d=>d>=s&&d<=e};
+  }
+  if(piePeriod==='yil'){const y=String(cursor.getFullYear());return{label:y+' Yılı',test:d=>d.slice(0,4)===y}}
+  const y=cursor.getFullYear(),m=String(cursor.getMonth()+1).padStart(2,'0');
+  return{label:MONTHS[cursor.getMonth()]+' '+y,test:d=>d.slice(0,7)===y+'-'+m};
+}
+function arcPath(cx,cy,r0,r1,a0,a1){
+  const p=(r,a)=>(cx+r*Math.cos(a)).toFixed(2)+' '+(cy+r*Math.sin(a)).toFixed(2);
+  const large=(a1-a0)>Math.PI?1:0;
+  return 'M'+p(r1,a0)+' A'+r1+' '+r1+' 0 '+large+' 1 '+p(r1,a1)+
+         ' L'+p(r0,a1)+' A'+r0+' '+r0+' 0 '+large+' 0 '+p(r0,a0)+' Z';
+}
+function pieHTML(kind,rows,total){
+  if(!total)return '<div class="pempty">Bu dönemde '+kind+' yok.</div>';
+  const R=64,r=38,C=R+4,SZ=C*2;
+  let svg='<svg width="'+SZ+'" height="'+SZ+'" viewBox="0 0 '+SZ+' '+SZ+'" role="img" aria-label="'+kind+' dağılımı">';
+  if(rows.length===1){
+    svg+='<circle cx="'+C+'" cy="'+C+'" r="'+((R+r)/2)+'" fill="none" stroke="'+pieColor(kind,rows[0][0])+'" stroke-width="'+(R-r)+'"/>';
+  }else{
+    let a=-Math.PI/2;
+    for(const [type,amt] of rows){
+      const a2=a+(amt/total)*Math.PI*2;
+      svg+='<path d="'+arcPath(C,C,r,R,a,a2)+'" fill="'+pieColor(kind,type)+'" stroke="var(--card)" stroke-width="2"/>';
+      const frac=amt/total;
+      if(frac>=0.10){ // yalnız büyük dilimlere doğrudan % etiketi
+        const mid=(a+a2)/2,lr=(R+r)/2;
+        svg+='<text x="'+(C+lr*Math.cos(mid)).toFixed(1)+'" y="'+(C+lr*Math.sin(mid)).toFixed(1)+
+          '" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="800" fill="#fff">%'+Math.round(frac*100)+'</text>';
+      }
+      a=a2;
+    }
+  }
+  svg+='<text x="'+C+'" y="'+(C-6)+'" text-anchor="middle" font-size="11" fill="var(--muted)">Toplam</text>'+
+       '<text x="'+C+'" y="'+(C+10)+'" text-anchor="middle" font-size="13" font-weight="800" fill="var(--txt)">'+fmtS(total)+'</text></svg>';
+  let leg='<div class="plegend">';
+  for(const [type,amt] of rows){
+    leg+='<div class="plrow"><i style="background:'+pieColor(kind,type)+'"></i><span>'+(EMOJI[type]||'•')+
+      '</span><span class="pn">'+type+'</span><span class="ppc">%'+Math.round(amt/total*100)+
+      '</span><span class="pam">'+fmt(amt)+'</span></div>';
+  }
+  leg+='</div>';
+  return '<div class="pierow">'+svg+leg+'</div>';
+}
+function renderPies(){
+  const rg=periodRange();
+  const list=entries.filter(t=>rg.test(t.date));
+  for(const kind of ['gider','gelir']){
+    const by={};let total=0;
+    list.filter(t=>t.kind===kind).forEach(t=>{by[t.type]=(by[t.type]||0)+t.amount;total+=t.amount});
+    const rows=Object.entries(by).sort((a,b)=>b[1]-a[1]);
+    document.getElementById(kind==='gider'?'pieOut':'pieIn').innerHTML=pieHTML(kind,rows,total);
+    document.getElementById(kind==='gider'?'pieOutLab':'pieInLab').textContent=rg.label;
+  }
+}
+document.getElementById('pieToggle').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;
+  piePeriod=b.dataset.p;
+  document.querySelectorAll('#pieToggle button').forEach(x=>x.classList.toggle('on',x===b));
+  renderPies();
+});
 function catSection(mt,kind,total){
   const list=mt.filter(t=>t.kind===kind);
   const ttl=kind==='gider'?'Gider Dağılımı':'Gelir Dağılımı';
@@ -387,8 +516,17 @@ function catSection(mt,kind,total){
   let html=`<div class="sectitle">${ttl}<span class="tot">${fmt(total)}</span></div>`;
   Object.entries(by).sort((a,b)=>b[1]-a[1]).forEach(([type,amt])=>{
     const pc=total?Math.round(amt/total*100):0;
+    const det=list.filter(t=>t.type===type).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    let dhtml='';
+    det.forEach(t=>{
+      const p=(t.date||'').split('-');
+      const dd=p.length===3?(Number(p[2])+' '+MONTHS[Number(p[1])-1].slice(0,3)):'—';
+      const lbl=esc(t.note||t.source||'—');
+      dhtml+=`<div class="drow"><span class="dd">${dd}</span><span class="dl">${lbl}</span><span class="da">${fmt(t.amount)}</span></div>`;
+    });
     html+=`<div class="catrow ${kind==='gelir'?'in':'out'}"><div class="top"><span class="e">${EMOJI[type]||'•'}</span><span>${type}</span>
-      <span class="pc">%${pc}</span><span class="am">${fmt(amt)}</span></div><div class="bar"><i style="width:${pc}%"></i></div></div>`;
+      <span class="pc">%${pc}</span><span class="am">${fmt(amt)}</span><span class="cv">▼</span></div><div class="bar"><i style="width:${pc}%"></i></div>
+      <div class="catdet">${dhtml}</div></div>`;
   });
   return html;
 }
@@ -467,6 +605,7 @@ async function saveModal(){
 }
 async function deleteEntry(){
   if(!edit)return;if(!confirm('Bu kayıt silinsin mi?'))return;
+  dels[edit]=Date.now();persistDels();   // silme diğer cihaza da taşınsın
   await imgDel(edit);entries=entries.filter(x=>x.id!==edit);save();closeModal();render();
 }
 
@@ -493,6 +632,139 @@ function doImport(file){
   fr.readAsText(file);
 }
 function closeBk(){document.getElementById('bkModal').classList.remove('open')}
+
+/* ---- Bulut senkron (kod ile, MyCards gibi) ---- */
+let syncCode=localStorage.getItem('mykasa_sync_code')||'';
+let syncT=null,pushingKV=false;
+function kvKey(){return 'mykasa_'+syncCode.replace(/[^A-Za-z0-9_-]/g,'')}
+function scheduleSync(){if(!syncCode)return;clearTimeout(syncT);syncT=setTimeout(()=>kvPush(false),3000)}
+function syncStatus(){
+  const el=document.getElementById('syncSt');if(!el)return;
+  if(!syncCode){el.innerHTML='Kod belirlersen her değişiklik <b style="color:var(--accent2)">otomatik</b> buluta yedeklenir; diğer cihazda aynı kodu yazıp "Buluttan getir" ile güncellemeleri alırsın. İlk istekte sunucunun uyanması ~30 sn sürebilir.';return}
+  const t=Number(localStorage.getItem('mykasa_last_sync')||0);
+  el.innerHTML='<b style="color:var(--accent2)">Otomatik yedek açık</b> — kod: <b>'+syncCode+'</b>'+
+    (t?' • Son eşitleme: '+new Date(t).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'');
+}
+async function kvMerge(d){
+  const incDels=d.dels||{};let added=0,removed=0,changed=false;
+  for(const id in incDels){if(!dels[id]||dels[id]<incDels[id]){dels[id]=incDels[id];changed=true}}
+  const keep=[];
+  for(const t of entries){
+    const dt=dels[t.id];
+    if(dt&&dt>=(t.ts||0)){await imgDel(t.id);removed++;changed=true}
+    else keep.push(t);
+  }
+  entries=keep;
+  const have=new Set(entries.map(e=>e.id));
+  for(const t of (d.entries||[])){
+    const dt=dels[t.id];
+    if(dt&&dt>=(t.ts||0))continue;
+    if(!have.has(t.id)){
+      entries.push(t);have.add(t.id);added++;
+      if(d.images&&d.images[t.id])await imgPut(t.id,d.images[t.id]);
+    }
+  }
+  if(changed||added){persistDels();save()}
+  return{added,removed};
+}
+async function kvPush(manual){
+  if(!syncCode){if(manual)alert('Önce senkron kodu yaz');return}
+  if(pushingKV)return;pushingKV=true;
+  try{
+    const images=await imgAll();
+    const r=await fetch(API+'/api/kv/'+kvKey(),{method:'PUT',headers:{'content-type':'application/json'},
+      body:JSON.stringify({data:{app:'MyKasa',v:2,updatedAt:Date.now(),entries,images,dels}})});
+    if(!r.ok)throw 0;
+    localStorage.setItem('mykasa_last_sync',String(Date.now()));syncStatus();
+    if(manual)alert('Buluta yedeklendi ✓ ('+entries.length+' kayıt)');
+  }catch(e){
+    if(manual)alert('Yedeklenemedi — ilk istekte sunucu uyanıyor olabilir, 30 sn sonra tekrar dene');
+    else scheduleSync();
+  }finally{pushingKV=false}
+}
+async function kvPull(manual){
+  if(!syncCode){if(manual)alert('Önce senkron kodu yaz');return}
+  try{
+    const r=await fetch(API+'/api/kv/'+kvKey());
+    if(!r.ok)throw 0;
+    const j=await r.json();const d=j&&j.data;
+    if(!d||!Array.isArray(d.entries)){if(manual)alert('Bu kodla bulutta yedek yok — önce diğer cihazda "Buluta yedekle"');return}
+    const res=await kvMerge(d);
+    localStorage.setItem('mykasa_last_sync',String(Date.now()));
+    render();syncStatus();
+    if(manual)alert((res.added||res.removed)
+      ?('Eşitlendi ✓ '+res.added+' yeni kayıt'+(res.removed?', '+res.removed+' silinen':'')+'. Toplam '+entries.length+'.')
+      :'Zaten güncel ✓ ('+entries.length+' kayıt)');
+  }catch(e){if(manual)alert('Buluttan alınamadı — ilk istekte sunucu uyanıyor olabilir, 30 sn sonra tekrar dene')}
+}
+
+/* ---- Google Drive yedeği ---- */
+const GOOGLE_CLIENT_ID='93563620545-2jm0ajsd8qes1ou0dj5bsp5g0rs6t9qj.apps.googleusercontent.com';
+const DRIVE_FILE_NAME='mykasa-yedek.json';
+let gTokenClient=null,gToken=null;
+function gisReady(){return window.google&&google.accounts&&google.accounts.oauth2}
+function withToken(cb){
+  if(!gisReady()){alert('Google bağlanamadı — sayfayı yenileyip tekrar dene');return}
+  if(!gTokenClient){
+    gTokenClient=google.accounts.oauth2.initTokenClient({
+      client_id:GOOGLE_CLIENT_ID,
+      scope:'https://www.googleapis.com/auth/drive.file',
+      callback:function(){}
+    });
+  }
+  gTokenClient.callback=resp=>{
+    if(resp&&resp.access_token){gToken=resp.access_token;cb()}
+    else alert('Drive izni alınamadı');
+  };
+  gTokenClient.error_callback=()=>{};
+  try{gTokenClient.requestAccessToken({prompt:gToken?'':'consent'})}catch(e){alert('Drive hatası')}
+}
+async function driveFindFile(){
+  const u='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent("name='"+DRIVE_FILE_NAME+"' and trashed=false")+'&spaces=drive&fields=files(id,name)';
+  const r=await fetch(u,{headers:{Authorization:'Bearer '+gToken}});
+  const j=await r.json();
+  return (j.files&&j.files.length)?j.files[0].id:null;
+}
+/* Büyük yedekler (fiş fotoğrafları) için resumable upload — 5 MB sınırına takılmaz */
+async function driveUpload(id,content){
+  const url=id
+    ?'https://www.googleapis.com/upload/drive/v3/files/'+id+'?uploadType=resumable'
+    :'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable';
+  const init=await fetch(url,{method:id?'PATCH':'POST',
+    headers:{Authorization:'Bearer '+gToken,'Content-Type':'application/json; charset=UTF-8'},
+    body:id?'{}':JSON.stringify({name:DRIVE_FILE_NAME,mimeType:'application/json'})});
+  if(!init.ok)throw 0;
+  const loc=init.headers.get('Location');
+  if(!loc)throw 0;
+  const up=await fetch(loc,{method:'PUT',headers:{'Content-Type':'application/json'},body:content});
+  if(!up.ok)throw 0;
+}
+function driveSave(){
+  withToken(async()=>{
+    try{
+      const images=await imgAll();
+      const content=JSON.stringify({app:'MyKasa',v:2,exportedAt:new Date().toISOString(),entries,images});
+      const id=await driveFindFile();
+      await driveUpload(id,content);
+      closeBk();alert("Drive'a yedeklendi ✓ ("+entries.length+' kayıt)');
+    }catch(e){alert("Drive'a yazılamadı — tekrar dene")}
+  });
+}
+function driveLoad(){
+  withToken(async()=>{
+    try{
+      const id=await driveFindFile();
+      if(!id){alert("Drive'da yedek bulunamadı — önce 'Drive'a yedekle' yap");return}
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+id+'?alt=media',{headers:{Authorization:'Bearer '+gToken}});
+      const data=await r.json();
+      if(!data||!Array.isArray(data.entries))throw 0;
+      if(!confirm('Drive yedeği geri yüklenecek. Mevcut '+entries.length+' kayıt, yedekteki '+data.entries.length+' kayıtla DEĞİŞTİRİLECEK. Devam?'))return;
+      entries=data.entries;save();
+      if(data.images){for(const [id2,v] of Object.entries(data.images)){await imgPut(id2,v)}}
+      closeBk();render();alert('Geri yüklendi ✓ ('+entries.length+' kayıt)');
+    }catch(e){alert("Drive'dan okunamadı — tekrar dene")}
+  });
+}
 
 /* ---- FAB menü ---- */
 function toggleFab(open){
@@ -523,10 +795,22 @@ document.getElementById('fCam').onchange=e=>onPhoto(e.target.files[0]);
 document.getElementById('fGal').onchange=e=>onPhoto(e.target.files[0]);
 document.getElementById('pThumb').onclick=()=>{const s=document.getElementById('pThumb').src;if(s){document.getElementById('imgViewImg').src=s;document.getElementById('imgView').classList.add('open')}};
 document.getElementById('imgView').onclick=()=>document.getElementById('imgView').classList.remove('open');
-document.getElementById('menuBtn').onclick=()=>document.getElementById('bkModal').classList.add('open');
+document.getElementById('menuBtn').onclick=()=>{syncStatus();document.getElementById('bkModal').classList.add('open')};
+document.getElementById('syncCode').value=syncCode;
+document.getElementById('syncCode').addEventListener('change',e=>{
+  syncCode=e.target.value.trim();
+  localStorage.setItem('mykasa_sync_code',syncCode);
+  syncStatus();
+  if(syncCode)scheduleSync();
+});
+document.getElementById('syncPush').onclick=()=>kvPush(true);
+document.getElementById('syncPull').onclick=()=>kvPull(true);
+if(syncCode)setTimeout(()=>kvPull(false),1200); // açılışta sessizce eşitle
 document.getElementById('bkCancel').onclick=closeBk;
 document.getElementById('bkModal').onclick=e=>{if(e.target.id==='bkModal')closeBk()};
 document.getElementById('bkExport').onclick=doExport;
+document.getElementById('bkDriveSave').onclick=driveSave;
+document.getElementById('bkDriveLoad').onclick=driveLoad;
 document.getElementById('bkImport').onclick=()=>document.getElementById('fImport').click();
 document.getElementById('fImport').onchange=e=>{if(e.target.files[0])doImport(e.target.files[0])};
 document.querySelectorAll('.tabbar button').forEach(b=>b.onclick=()=>{
