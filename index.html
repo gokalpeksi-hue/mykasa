@@ -307,8 +307,10 @@
       <button id="bkExport"><span>⬇️</span><div><div>Yedeği indir</div><div class="sub">Tüm kayıtlar + fişler tek dosya (Drive'a yükleyebilirsin)</div></div></button>
       <button id="bkImport"><span>⬆️</span><div><div>Geri yükle</div><div class="sub">Drive'dan/telefondan yedek dosyası seç</div></div></button>
       <button id="bkDriveSave"><span>☁️</span><div><div>Drive'a yedekle</div><div class="sub">Tek dokunuşla Google Drive'a kaydeder (mykasa-yedek.json)</div></div></button>
-      <button id="bkDriveLoad"><span>📥</span><div><div>Drive'dan geri yükle</div><div class="sub">Drive'daki yedeği indirir ve geri yükler</div></div></button>
+      <button id="bkDriveLoad"><span>📥</span><div><div>Drive'dan geri yükle</div><div class="sub">Yedeği indirir ve mevcut kayıtlarla birleştirir (silmez)</div></div></button>
+      <button id="bkPdf"><span>📄</span><div><div>PDF rapor indir</div><div class="sub">Görünen ayın gelir/gider tabloları + yıllık aylık özet</div></div></button>
     </div>
+    <div id="driveSt" style="font-size:12px;color:var(--muted);margin:8px 2px 0;line-height:1.5"></div>
     <div class="btnrow" style="margin-top:4px"><button class="btn btn-ghost" id="bkCancel">Kapat</button></div>
     <input type="file" id="fImport" accept="application/json,.json" hidden>
   </div>
@@ -334,7 +336,9 @@ let tab='islemler';
 let edit=null, mKind='gider', mType=null, mImg=undefined; // mImg: undefined=değişmedi, null=silindi, string=yeni
 
 function load(){try{return JSON.parse(localStorage.getItem(LS))||[]}catch(e){return[]}}
-function save(){localStorage.setItem(LS,JSON.stringify(entries));scheduleSync()}
+function save(){localStorage.setItem(LS,JSON.stringify(entries));mirror();scheduleSync()}
+// localStorage tarayıcı tarafından temizlenirse geri dönebilmek için IndexedDB'de ayna kopya tut
+function mirror(){kvIdbPut('backup',{entries:entries,dels:dels,savedAt:Date.now()}).catch(()=>{})}
 let dels=(function(){try{return JSON.parse(localStorage.getItem('mykasa_dels'))||{}}catch(e){return{}}})();
 function persistDels(){try{localStorage.setItem('mykasa_dels',JSON.stringify(dels))}catch(e){}}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
@@ -350,8 +354,13 @@ function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','
 function typesFor(k){return k==='gelir'?GELIR_TYPES:GIDER_TYPES}
 
 /* ---- IndexedDB (fiş görselleri) ---- */
-function idb(){return new Promise((res,rej)=>{const r=indexedDB.open('mykasa',1);
-  r.onupgradeneeded=()=>r.result.createObjectStore('imgs');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+function idb(){return new Promise((res,rej)=>{const r=indexedDB.open('mykasa',2);
+  r.onupgradeneeded=()=>{const db=r.result;
+    if(!db.objectStoreNames.contains('imgs'))db.createObjectStore('imgs');
+    if(!db.objectStoreNames.contains('kv'))db.createObjectStore('kv')};
+  r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function kvIdbPut(k,v){const db=await idb();return new Promise(res=>{const t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=()=>res();t.onerror=()=>res()})}
+async function kvIdbGet(k){const db=await idb();return new Promise(res=>{const t=db.transaction('kv','readonly');const q=t.objectStore('kv').get(k);q.onsuccess=()=>res(q.result||null);q.onerror=()=>res(null)})}
 async function imgPut(id,v){const db=await idb();return new Promise((res,rej)=>{const t=db.transaction('imgs','readwrite');t.objectStore('imgs').put(v,id);t.oncomplete=()=>res();t.onerror=()=>rej(t.error)})}
 async function imgGet(id){const db=await idb();return new Promise(res=>{const t=db.transaction('imgs','readonly');const q=t.objectStore('imgs').get(id);q.onsuccess=()=>res(q.result||null);q.onerror=()=>res(null)})}
 async function imgDel(id){const db=await idb();return new Promise(res=>{const t=db.transaction('imgs','readwrite');t.objectStore('imgs').delete(id);t.oncomplete=()=>res();t.onerror=()=>res()})}
@@ -618,15 +627,27 @@ async function doExport(){
   setTimeout(()=>URL.revokeObjectURL(url),2000);
   closeBk();
 }
+/* Yedek geri yükleme artık BİRLEŞTİRİR — mevcut kayıtlar asla silinmez */
+async function mergeRestore(data){
+  const have=new Map(entries.map(e=>[e.id,e]));let added=0;
+  for(const t of (data.entries||[])){
+    if(!t||!t.id)continue;
+    if(dels[t.id])delete dels[t.id]; // geri yüklenen kayıt, senkron silme listesinden çıkar
+    const ex=have.get(t.id);
+    if(!ex){entries.push(t);have.set(t.id,t);added++}
+    else if((t.ts||0)>(ex.ts||0))Object.assign(ex,t);
+  }
+  if(data.images){for(const [id,v] of Object.entries(data.images)){await imgPut(id,v)}}
+  persistDels();save();return added;
+}
 function doImport(file){
   const fr=new FileReader();
   fr.onload=async()=>{
     try{const data=JSON.parse(fr.result);
       if(!data||!Array.isArray(data.entries))throw 0;
-      if(!confirm('Yedek geri yüklenecek. Mevcut '+entries.length+' kayıt, yedekteki '+data.entries.length+' kayıtla DEĞİŞTİRİLECEK. Devam?'))return;
-      entries=data.entries;save();
-      if(data.images){for(const [id,v] of Object.entries(data.images)){await imgPut(id,v)}}
-      closeBk();render();alert('Geri yüklendi ✓ ('+entries.length+' kayıt)');
+      if(!confirm('Yedekteki '+data.entries.length+' kayıt, mevcut '+entries.length+' kayıtla BİRLEŞTİRİLECEK — hiçbir kayıt silinmez. Devam?'))return;
+      const added=await mergeRestore(data);
+      closeBk();render();alert('Geri yüklendi ✓ '+added+' yeni kayıt eklendi. Toplam '+entries.length+'.');
     }catch(e){alert('Geçersiz yedek dosyası.')}
   };
   fr.readAsText(file);
@@ -746,6 +767,7 @@ function driveSave(){
       const content=JSON.stringify({app:'MyKasa',v:2,exportedAt:new Date().toISOString(),entries,images});
       const id=await driveFindFile();
       await driveUpload(id,content);
+      localStorage.setItem('mykasa_drive_last',String(Date.now()));
       closeBk();alert("Drive'a yedeklendi ✓ ("+entries.length+' kayıt)');
     }catch(e){alert("Drive'a yazılamadı — tekrar dene")}
   });
@@ -758,12 +780,94 @@ function driveLoad(){
       const r=await fetch('https://www.googleapis.com/drive/v3/files/'+id+'?alt=media',{headers:{Authorization:'Bearer '+gToken}});
       const data=await r.json();
       if(!data||!Array.isArray(data.entries))throw 0;
-      if(!confirm('Drive yedeği geri yüklenecek. Mevcut '+entries.length+' kayıt, yedekteki '+data.entries.length+' kayıtla DEĞİŞTİRİLECEK. Devam?'))return;
-      entries=data.entries;save();
-      if(data.images){for(const [id2,v] of Object.entries(data.images)){await imgPut(id2,v)}}
-      closeBk();render();alert('Geri yüklendi ✓ ('+entries.length+' kayıt)');
+      if(!confirm('Drive yedeğindeki '+data.entries.length+' kayıt, mevcut '+entries.length+' kayıtla BİRLEŞTİRİLECEK — hiçbir kayıt silinmez. Devam?'))return;
+      const added=await mergeRestore(data);
+      closeBk();render();alert('Geri yüklendi ✓ '+added+' yeni kayıt eklendi. Toplam '+entries.length+'.');
     }catch(e){alert("Drive'dan okunamadı — tekrar dene")}
   });
+}
+
+/* ---- PDF rapor ---- */
+let pdfLibs=null;
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=()=>res();s.onerror=()=>rej(new Error(src));document.head.appendChild(s)})}
+function loadPdfLibs(){
+  if(!pdfLibs)pdfLibs=(async()=>{
+    if(!window.jspdf)await loadScript('vendor/jspdf.umd.min.js');
+    if(!window.jspdf.jsPDF.API.autoTable)await loadScript('vendor/jspdf.plugin.autotable.min.js');
+    if(!window.MYKASA_FONTS)await loadScript('vendor/roboto-font.js');
+  })().catch(e=>{pdfLibs=null;throw e});
+  return pdfLibs;
+}
+async function exportPdf(){
+  const btn=document.getElementById('bkPdf');
+  try{
+    btn.disabled=true;
+    await loadPdfLibs();
+    const {jsPDF}=window.jspdf;
+    const doc=new jsPDF({unit:'pt',format:'a4'});
+    doc.addFileToVFS('Roboto-Regular.ttf',MYKASA_FONTS.regular);doc.addFont('Roboto-Regular.ttf','Roboto','normal');
+    doc.addFileToVFS('Roboto-Bold.ttf',MYKASA_FONTS.bold);doc.addFont('Roboto-Bold.ttf','Roboto','bold');
+    doc.setFont('Roboto','normal');
+    const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),M=40;
+    const y0=cursor.getFullYear(),m0=cursor.getMonth();
+    const mt=monthEntries(cursor);
+    const inc=mt.filter(t=>t.kind==='gelir').reduce((s,t)=>s+t.amount,0);
+    const exp=mt.filter(t=>t.kind==='gider').reduce((s,t)=>s+t.amount,0);
+    doc.setFont('Roboto','bold');doc.setFontSize(18);doc.setTextColor(14,159,122);
+    doc.text('MyKasa',M,52);
+    doc.setTextColor(30,30,30);doc.setFontSize(14);
+    doc.text(MONTHS[m0]+' '+y0+' Raporu',M,72);
+    doc.setFont('Roboto','normal');doc.setFontSize(9);doc.setTextColor(120,120,120);
+    doc.text('Oluşturma: '+new Date().toLocaleString('tr-TR'),W-M,52,{align:'right'});
+    doc.setFontSize(11);doc.setTextColor(30,30,30);
+    doc.text('Gelir: '+fmt(inc)+'      Gider: '+fmt(exp)+'      Kalan: '+fmt(inc-exp),M,94);
+    const tbl={margin:{left:M,right:M},
+      styles:{font:'Roboto',fontSize:9,cellPadding:4},
+      headStyles:{font:'Roboto',fontStyle:'bold',fillColor:[14,159,122],textColor:255},
+      footStyles:{font:'Roboto',fontStyle:'bold',fillColor:[235,245,240],textColor:[20,20,20]},
+      alternateRowStyles:{fillColor:[246,250,248]}};
+    const dstr=s=>{const p=(s||'').split('-');return p.length===3?(p[2]+'.'+p[1]+'.'+p[0]):(s||'—')};
+    const gel=mt.filter(t=>t.kind==='gelir').sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    const gid=mt.filter(t=>t.kind==='gider').sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    let y=112;
+    doc.setFont('Roboto','bold');doc.setFontSize(12);doc.text('Gelirler',M,y);
+    doc.autoTable(Object.assign({},tbl,{startY:y+8,
+      head:[['Tarih','Tür','Kaynak','Tutar']],
+      body:gel.length?gel.map(t=>[dstr(t.date),t.type,t.source||'—',fmt(t.amount)]):[['—','Bu ay gelir kaydı yok','','']],
+      foot:[['','','Toplam',fmt(inc)]],
+      columnStyles:{0:{cellWidth:70},3:{halign:'right',cellWidth:90}}}));
+    y=doc.lastAutoTable.finalY+26;
+    if(y>H-140){doc.addPage();y=52}
+    doc.setFont('Roboto','bold');doc.setFontSize(12);doc.text('Giderler',M,y);
+    doc.autoTable(Object.assign({},tbl,{startY:y+8,
+      head:[['Tarih','Tip','Açıklama','Tutar']],
+      body:gid.length?gid.map(t=>[dstr(t.date),t.type,t.note||'—',fmt(t.amount)]):[['—','Bu ay gider kaydı yok','','']],
+      foot:[['','','Toplam',fmt(exp)]],
+      columnStyles:{0:{cellWidth:70},3:{halign:'right',cellWidth:90}}}));
+    y=doc.lastAutoTable.finalY+26;
+    if(y>H-160){doc.addPage();y=52}
+    doc.setFont('Roboto','bold');doc.setFontSize(12);doc.text(y0+' Yılı Aylık Özet',M,y);
+    const rows=[];let ti=0,te=0;
+    for(let m=0;m<12;m++){
+      const me=monthEntries(new Date(y0,m,1));
+      if(!me.length)continue;
+      const i=me.filter(t=>t.kind==='gelir').reduce((s,t)=>s+t.amount,0);
+      const e=me.filter(t=>t.kind==='gider').reduce((s,t)=>s+t.amount,0);
+      ti+=i;te+=e;
+      rows.push([MONTHS[m],fmt(i),fmt(e),fmt(i-e)]);
+    }
+    doc.autoTable(Object.assign({},tbl,{startY:y+8,
+      head:[['Ay','Gelir','Gider','Net']],
+      body:rows.length?rows:[['—','Bu yıl kayıt yok','','']],
+      foot:[['Toplam',fmt(ti),fmt(te),fmt(ti-te)]],
+      columnStyles:{1:{halign:'right'},2:{halign:'right'},3:{halign:'right'}}}));
+    const n=doc.getNumberOfPages();
+    for(let i=1;i<=n;i++){doc.setPage(i);doc.setFont('Roboto','normal');doc.setFontSize(8);doc.setTextColor(150);
+      doc.text('Sayfa '+i+' / '+n,W/2,H-16,{align:'center'})}
+    doc.save('mykasa-rapor-'+y0+'-'+String(m0+1).padStart(2,'0')+'.pdf');
+    closeBk();
+  }catch(e){alert('PDF oluşturulamadı — sayfayı yenileyip tekrar dene')}
+  finally{btn.disabled=false}
 }
 
 /* ---- FAB menü ---- */
@@ -795,7 +899,14 @@ document.getElementById('fCam').onchange=e=>onPhoto(e.target.files[0]);
 document.getElementById('fGal').onchange=e=>onPhoto(e.target.files[0]);
 document.getElementById('pThumb').onclick=()=>{const s=document.getElementById('pThumb').src;if(s){document.getElementById('imgViewImg').src=s;document.getElementById('imgView').classList.add('open')}};
 document.getElementById('imgView').onclick=()=>document.getElementById('imgView').classList.remove('open');
-document.getElementById('menuBtn').onclick=()=>{syncStatus();document.getElementById('bkModal').classList.add('open')};
+function driveStatus(){
+  const el=document.getElementById('driveSt');if(!el)return;
+  const t=Number(localStorage.getItem('mykasa_drive_last')||0);
+  el.textContent=t
+    ?('Son Drive yedeği: '+new Date(t).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}))
+    :'Henüz Drive yedeği alınmadı — düzenli yedek almanı öneririz.';
+}
+document.getElementById('menuBtn').onclick=()=>{syncStatus();driveStatus();document.getElementById('bkModal').classList.add('open')};
 document.getElementById('syncCode').value=syncCode;
 document.getElementById('syncCode').addEventListener('change',e=>{
   syncCode=e.target.value.trim();
@@ -811,6 +922,7 @@ document.getElementById('bkModal').onclick=e=>{if(e.target.id==='bkModal')closeB
 document.getElementById('bkExport').onclick=doExport;
 document.getElementById('bkDriveSave').onclick=driveSave;
 document.getElementById('bkDriveLoad').onclick=driveLoad;
+document.getElementById('bkPdf').onclick=exportPdf;
 document.getElementById('bkImport').onclick=()=>document.getElementById('fImport').click();
 document.getElementById('fImport').onchange=e=>{if(e.target.files[0])doImport(e.target.files[0])};
 document.querySelectorAll('.tabbar button').forEach(b=>b.onclick=()=>{
@@ -823,6 +935,20 @@ document.querySelectorAll('.tabbar button').forEach(b=>b.onclick=()=>{
 
 render();
 if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));}
+
+/* ---- Veri koruması: kalıcı depolama + IndexedDB aynasından kurtarma ---- */
+if(navigator.storage&&navigator.storage.persist){navigator.storage.persist().catch(()=>{})}
+kvIdbGet('backup').then(b=>{
+  if(b&&Array.isArray(b.entries)&&b.entries.length&&!entries.length){
+    // localStorage temizlenmiş — ayna kopyadan geri getir
+    entries=b.entries;
+    dels=Object.assign({},b.dels||{},dels);persistDels();
+    localStorage.setItem(LS,JSON.stringify(entries));
+    render();
+  }else{
+    mirror();
+  }
+}).catch(()=>{});
 </script>
 </body>
 </html>
