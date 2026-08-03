@@ -1,4 +1,4 @@
-const CACHE = 'mykasa-v4';
+const CACHE = 'mykasa-v5';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest',
   './icon-192.png', './icon-512.png',
