@@ -1,7 +1,8 @@
-const CACHE = 'mykasa-v2';
+const CACHE = 'mykasa-v3';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest',
-  './icon-192.png', './icon-512.png'
+  './icon-192.png', './icon-512.png',
+  './vendor/jspdf.umd.min.js', './vendor/jspdf.plugin.autotable.min.js', './vendor/roboto-font.js'
 ];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -16,6 +17,6 @@ self.addEventListener('fetch', e => {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
       return res;
-    }).catch(() => caches.match('./index.html')))
+    }).catch(() => e.request.mode === 'navigate' ? caches.match('./index.html') : Response.error()))
   );
 });
