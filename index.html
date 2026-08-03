@@ -307,7 +307,7 @@
       <button id="bkExport"><span>⬇️</span><div><div>Yedeği indir</div><div class="sub">Tüm kayıtlar + fişler tek dosya (Drive'a yükleyebilirsin)</div></div></button>
       <button id="bkImport"><span>⬆️</span><div><div>Geri yükle</div><div class="sub">Drive'dan/telefondan yedek dosyası seç</div></div></button>
       <button id="bkDriveSave"><span>☁️</span><div><div>Drive'a yedekle</div><div class="sub">Tek dokunuşla Google Drive'a kaydeder (mykasa-yedek.json)</div></div></button>
-      <button id="bkDriveLoad"><span>📥</span><div><div>Drive'dan geri yükle</div><div class="sub">Yedeği indirir ve mevcut kayıtlarla birleştirir (silmez)</div></div></button>
+      <button id="bkDriveLoad"><span>📥</span><div><div>Drive'dan geri yükle</div><div class="sub">En yeni dolu yedeği bulur, kayıtlarla birleştirir (silmez)</div></div></button>
       <button id="bkPdf"><span>📄</span><div><div>PDF rapor indir</div><div class="sub">Görünen ayın gelir/gider tabloları + yıllık aylık özet</div></div></button>
     </div>
     <div id="driveSt" style="font-size:12px;color:var(--muted);margin:8px 2px 0;line-height:1.5"></div>
@@ -746,6 +746,17 @@ async function driveFindFile(){
   const j=await r.json();
   return (j.files&&j.files.length)?j.files[0].id:null;
 }
+/* Geri yükleme için: adında 'mykasa-yedek' geçen TÜM dosyalar içinden en yeni DOLU olanı bul
+   (boş/bozuk yedekler ve indirilen tarihli yedekler de taranır) */
+async function driveFindBackup(){
+  const u='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent("name contains 'mykasa-yedek' and trashed=false")+'&spaces=drive&fields=files(id,name,size,modifiedTime)&pageSize=100';
+  const r=await fetch(u,{headers:{Authorization:'Bearer '+gToken}});
+  const j=await r.json();
+  const fs=(j.files||[]).filter(f=>Number(f.size||0)>200); // içi boş yedekleri atla
+  if(!fs.length)return null;
+  fs.sort((a,b)=>(b.modifiedTime||'').localeCompare(a.modifiedTime||''));
+  return fs[0];
+}
 /* Büyük yedekler (fiş fotoğrafları) için resumable upload — 5 MB sınırına takılmaz */
 async function driveUpload(id,content){
   const url=id
@@ -775,15 +786,16 @@ function driveSave(){
 function driveLoad(){
   withToken(async()=>{
     try{
-      const id=await driveFindFile();
-      if(!id){alert("Drive'da yedek bulunamadı — önce 'Drive'a yedekle' yap");return}
-      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+id+'?alt=media',{headers:{Authorization:'Bearer '+gToken}});
+      const f=await driveFindBackup();
+      if(!f){alert("Drive'da içinde kayıt olan bir MyKasa yedeği bulunamadı — önce 'Drive'a yedekle' yap");return}
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+f.id+'?alt=media',{headers:{Authorization:'Bearer '+gToken}});
       const data=await r.json();
       if(!data||!Array.isArray(data.entries))throw 0;
-      if(!confirm('Drive yedeğindeki '+data.entries.length+' kayıt, mevcut '+entries.length+' kayıtla BİRLEŞTİRİLECEK — hiçbir kayıt silinmez. Devam?'))return;
+      if(!data.entries.length){alert("Bulunan yedek ('"+f.name+"') boş çıktı.");return}
+      if(!confirm("Drive'daki '"+f.name+"' yedeğindeki "+data.entries.length+' kayıt, mevcut '+entries.length+' kayıtla BİRLEŞTİRİLECEK — hiçbir kayıt silinmez. Devam?'))return;
       const added=await mergeRestore(data);
       closeBk();render();alert('Geri yüklendi ✓ '+added+' yeni kayıt eklendi. Toplam '+entries.length+'.');
-    }catch(e){alert("Drive'dan okunamadı — tekrar dene")}
+    }catch(e){alert("Drive'dan okunamadı — tekrar dene ("+(e&&e.message?e.message:'bilinmeyen hata')+")")}
   });
 }
 
