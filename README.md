@@ -5,6 +5,7 @@ Tarih bazlı **gelir / gider** ve **bakiye** takibi yapan mobil-öncelikli PWA.
 - En üstte **aylık gelir, aylık gider ve kalan**; altında tarih bazlı **para giriş/çıkış** listesi.
 - **Gelir**: tarih, kaynak, tutar, tür (Maaş, Havale/EFT, Nakit, Kira, Yatırım, Diğer).
 - **Gider**: tarih, tip (Havale, Bakkaliye, Cafe, Restaurant, Manav, Diğer), tutar.
+- ➕ **Özel kalemler**: kayıt eklerken "Yeni Ekle" ile kendi gelir/gider kalemini (ad + emoji) tanımlayabilirsin; yedeklere ve senkrona dahil edilir, × ile listeden kaldırılabilir (eski kayıtlar silinmez).
 - 📷 **Fotoğraf / fiş / ekran görüntüsü** çekerek veya galeriden yükleyerek kayıt: yapay zeka fişten tarih + tutar + türü otomatik okur (Claude vision), sen onaylarsın. Fiş görseli kayda eklenir.
 - ⬇️ **Yedekle / Geri Yükle**: tüm kayıtlar + fişler tek JSON dosyası (Google Drive'a yükleyip geri yükleyebilirsin). Geri yükleme **birleştirir** — mevcut kayıtlar silinmez.
 - ☁️ **Drive'a yedekle / Drive'dan geri yükle**: tek dokunuşla Google Drive (`mykasa-yedek.json`); menüde son yedek zamanı görünür.

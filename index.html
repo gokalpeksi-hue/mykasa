@@ -180,6 +180,8 @@
   .cats .c{padding:9px 12px;border-radius:99px;border:1px solid var(--line);background:#0a1612;color:var(--muted);
     font-size:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px}
   .cats .c.on{background:var(--card2);color:var(--txt);border-color:var(--accent2)}
+  .cats .c.addnew{border-style:dashed;color:var(--accent2)}
+  .cats .c .rm{margin-left:2px;padding:0 4px;color:var(--muted);font-weight:800;font-style:normal}
   .btnrow{display:flex;gap:10px;margin-top:8px}
   .btn{flex:1;padding:14px;border-radius:13px;border:none;font-size:15px;font-weight:700;cursor:pointer}
   .btn-primary{background:var(--accent);color:#04210f}
@@ -338,7 +340,7 @@ let edit=null, mKind='gider', mType=null, mImg=undefined; // mImg: undefined=de�
 function load(){try{return JSON.parse(localStorage.getItem(LS))||[]}catch(e){return[]}}
 function save(){localStorage.setItem(LS,JSON.stringify(entries));mirror();scheduleSync()}
 // localStorage tarayıcı tarafından temizlenirse geri dönebilmek için IndexedDB'de ayna kopya tut
-function mirror(){kvIdbPut('backup',{entries:entries,dels:dels,savedAt:Date.now()}).catch(()=>{})}
+function mirror(){kvIdbPut('backup',{entries:entries,dels:dels,customTypes:customTypes,savedAt:Date.now()}).catch(()=>{})}
 let dels=(function(){try{return JSON.parse(localStorage.getItem('mykasa_dels'))||{}}catch(e){return{}}})();
 function persistDels(){try{localStorage.setItem('mykasa_dels',JSON.stringify(dels))}catch(e){}}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
@@ -351,7 +353,24 @@ function fmtS(n){const a=Math.abs(n);
 function ymd(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function parseAmt(s){return Math.abs(parseFloat(String(s).replace(/\./g,'').replace(',','.')))||0}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-function typesFor(k){return k==='gelir'?GELIR_TYPES:GIDER_TYPES}
+/* ---- Kullanıcı tanımlı gelir/gider kalemleri ---- */
+let customTypes=(function(){try{const c=JSON.parse(localStorage.getItem('mykasa_custom_types'));return (c&&typeof c==='object')?{gelir:c.gelir||[],gider:c.gider||[]}:{gelir:[],gider:[]}}catch(e){return{gelir:[],gider:[]}}})();
+function persistCustom(){localStorage.setItem('mykasa_custom_types',JSON.stringify(customTypes));mirror()}
+function typesFor(k){const base=k==='gelir'?GELIR_TYPES:GIDER_TYPES;
+  // özel kalemler 'Diğer'den önce gelsin
+  return base.slice(0,-1).concat(customTypes[k]||[]).concat([base[base.length-1]])}
+function isCustom(kind,name){return (customTypes[kind]||[]).some(x=>x[0]===name)}
+function emojiOf(t){if(EMOJI[t])return EMOJI[t];
+  for(const k of ['gelir','gider'])for(const x of customTypes[k]||[])if(x[0]===t)return x[1]||'🏷️';
+  return '🏷️'}
+function mergeCustomTypes(inc){if(!inc)return;let ch=false;
+  for(const k of ['gelir','gider']){
+    const cur=customTypes[k]=customTypes[k]||[];
+    const names=new Set(cur.map(x=>x[0]));
+    const builtin=new Set((k==='gelir'?GELIR_TYPES:GIDER_TYPES).map(x=>x[0]));
+    for(const it of inc[k]||[]){if(it&&it[0]&&!names.has(it[0])&&!builtin.has(it[0])){cur.push([String(it[0]),String(it[1]||'🏷️')]);names.add(it[0]);ch=true}}
+  }
+  if(ch)persistCustom()}
 
 /* ---- IndexedDB (fiş görselleri) ---- */
 function idb(){return new Promise((res,rej)=>{const r=indexedDB.open('mykasa',2);
@@ -407,7 +426,7 @@ function renderList(mt){
       <span style="color:${dnet>=0?'var(--in2)':'var(--out2)'}">${dnet>=0?'+':'−'}${fmtS(Math.abs(dnet))}</span></div>`;
     list.forEach(t=>{
       html+=`<div class="tx ${t.kind==='gelir'?'in':'out'}" data-id="${t.id}">
-        <div class="ic" data-img="${t.hasImage?1:0}">${EMOJI[t.type]||'•'}</div>
+        <div class="ic" data-img="${t.hasImage?1:0}">${emojiOf(t.type)}</div>
         <div class="body"><div class="ttl">${esc(title(t))}</div>
           <div class="meta">${esc(t.type)}${t.kind==='gelir'&&t.source&&t.source!==title(t)?' • '+esc(t.source):''}${t.hasImage?'<span class="clip">📎</span>':''}</div></div>
         <div class="amt">${t.kind==='gelir'?'+':'−'}${fmt(t.amount)}</div></div>`;
@@ -493,7 +512,7 @@ function pieHTML(kind,rows,total){
        '<text x="'+C+'" y="'+(C+10)+'" text-anchor="middle" font-size="13" font-weight="800" fill="var(--txt)">'+fmtS(total)+'</text></svg>';
   let leg='<div class="plegend">';
   for(const [type,amt] of rows){
-    leg+='<div class="plrow"><i style="background:'+pieColor(kind,type)+'"></i><span>'+(EMOJI[type]||'•')+
+    leg+='<div class="plrow"><i style="background:'+pieColor(kind,type)+'"></i><span>'+emojiOf(type)+
       '</span><span class="pn">'+type+'</span><span class="ppc">%'+Math.round(amt/total*100)+
       '</span><span class="pam">'+fmt(amt)+'</span></div>';
   }
@@ -533,7 +552,7 @@ function catSection(mt,kind,total){
       const lbl=esc(t.note||t.source||'—');
       dhtml+=`<div class="drow"><span class="dd">${dd}</span><span class="dl">${lbl}</span><span class="da">${fmt(t.amount)}</span></div>`;
     });
-    html+=`<div class="catrow ${kind==='gelir'?'in':'out'}"><div class="top"><span class="e">${EMOJI[type]||'•'}</span><span>${type}</span>
+    html+=`<div class="catrow ${kind==='gelir'?'in':'out'}"><div class="top"><span class="e">${emojiOf(type)}</span><span>${type}</span>
       <span class="pc">%${pc}</span><span class="am">${fmt(amt)}</span><span class="cv">▼</span></div><div class="bar"><i style="width:${pc}%"></i></div>
       <div class="catdet">${dhtml}</div></div>`;
   });
@@ -569,8 +588,32 @@ function syncKind(){
 }
 function renderTypes(){
   const box=document.getElementById('mCats');
-  box.innerHTML=typesFor(mKind).map(([c,e])=>`<div class="c ${c===mType?'on':''}" data-c="${c}"><span>${e}</span>${c}</div>`).join('');
-  box.querySelectorAll('.c').forEach(el=>el.onclick=()=>{mType=el.dataset.c;renderTypes()});
+  const list=typesFor(mKind);
+  box.innerHTML=list.map(([c,e],i)=>
+    `<div class="c ${c===mType?'on':''}" data-i="${i}"><span>${e}</span>${esc(c)}${isCustom(mKind,c)?'<b class="rm" title="Kaldır">×</b>':''}</div>`
+  ).join('')+'<div class="c addnew" data-add="1"><span>➕</span>Yeni Ekle</div>';
+  box.querySelectorAll('.c').forEach(el=>el.onclick=ev=>{
+    if(ev.target.classList&&ev.target.classList.contains('rm')){
+      const name=list[Number(el.dataset.i)][0];
+      if(confirm("'"+name+"' kalemi listeden kaldırılsın mı? (Bu kalemle girilmiş eski kayıtlar silinmez)")){
+        customTypes[mKind]=(customTypes[mKind]||[]).filter(x=>x[0]!==name);persistCustom();
+        if(mType===name)mType=null;
+        renderTypes();
+      }
+      return;
+    }
+    if(el.dataset.add){
+      let name=prompt('Yeni '+(mKind==='gelir'?'gelir türü':'gider tipi')+' adı:');
+      if(!name)return;name=name.trim().slice(0,24);if(!name)return;
+      const existing=typesFor(mKind).map(x=>x[0].toLocaleLowerCase('tr'));
+      if(existing.includes(name.toLocaleLowerCase('tr'))){mType=typesFor(mKind).map(x=>x[0]).find(x=>x.toLocaleLowerCase('tr')===name.toLocaleLowerCase('tr'));renderTypes();return}
+      let em=(prompt('Simge (emoji) — boş bırakabilirsin:','')||'').trim().slice(0,8)||'🏷️';
+      (customTypes[mKind]=customTypes[mKind]||[]).push([name,em]);persistCustom();
+      mType=name;renderTypes();
+      return;
+    }
+    mType=list[Number(el.dataset.i)][0];renderTypes();
+  });
 }
 function setThumb(v){const t=document.getElementById('pThumb');if(v){t.src=v;t.classList.add('on')}else{t.classList.remove('on');t.removeAttribute('src')}}
 function setStatus(msg,cls){const s=document.getElementById('pStatus');s.textContent=msg||'';s.className='pstatus'+(cls?' '+cls:'')}
@@ -621,7 +664,7 @@ async function deleteEntry(){
 /* ---- Yedek ---- */
 async function doExport(){
   const images=await imgAll();
-  const blob=new Blob([JSON.stringify({app:'MyKasa',v:2,exportedAt:new Date().toISOString(),entries,images})],{type:'application/json'});
+  const blob=new Blob([JSON.stringify({app:'MyKasa',v:2,exportedAt:new Date().toISOString(),entries,images,customTypes})],{type:'application/json'});
   const url=URL.createObjectURL(blob);const a=document.createElement('a');
   a.href=url;a.download='mykasa-yedek-'+ymd(new Date())+'.json';a.click();
   setTimeout(()=>URL.revokeObjectURL(url),2000);
@@ -638,6 +681,7 @@ async function mergeRestore(data){
     else if((t.ts||0)>(ex.ts||0))Object.assign(ex,t);
   }
   if(data.images){for(const [id,v] of Object.entries(data.images)){await imgPut(id,v)}}
+  mergeCustomTypes(data.customTypes);
   persistDels();save();return added;
 }
 function doImport(file){
@@ -685,6 +729,7 @@ async function kvMerge(d){
       if(d.images&&d.images[t.id])await imgPut(t.id,d.images[t.id]);
     }
   }
+  mergeCustomTypes(d.customTypes);
   if(changed||added){persistDels();save()}
   return{added,removed};
 }
@@ -694,7 +739,7 @@ async function kvPush(manual){
   try{
     const images=await imgAll();
     const r=await fetch(API+'/api/kv/'+kvKey(),{method:'PUT',headers:{'content-type':'application/json'},
-      body:JSON.stringify({data:{app:'MyKasa',v:2,updatedAt:Date.now(),entries,images,dels}})});
+      body:JSON.stringify({data:{app:'MyKasa',v:2,updatedAt:Date.now(),entries,images,dels,customTypes}})});
     if(!r.ok)throw 0;
     localStorage.setItem('mykasa_last_sync',String(Date.now()));syncStatus();
     if(manual)alert('Buluta yedeklendi ✓ ('+entries.length+' kayıt)');
@@ -775,7 +820,7 @@ function driveSave(){
   withToken(async()=>{
     try{
       const images=await imgAll();
-      const content=JSON.stringify({app:'MyKasa',v:2,exportedAt:new Date().toISOString(),entries,images});
+      const content=JSON.stringify({app:'MyKasa',v:2,exportedAt:new Date().toISOString(),entries,images,customTypes});
       const id=await driveFindFile();
       await driveUpload(id,content);
       localStorage.setItem('mykasa_drive_last',String(Date.now()));
@@ -955,7 +1000,9 @@ kvIdbGet('backup').then(b=>{
     // localStorage temizlenmiş — ayna kopyadan geri getir
     entries=b.entries;
     dels=Object.assign({},b.dels||{},dels);persistDels();
+    if(b.customTypes&&!((customTypes.gelir||[]).length+(customTypes.gider||[]).length)){customTypes={gelir:b.customTypes.gelir||[],gider:b.customTypes.gider||[]}}
     localStorage.setItem(LS,JSON.stringify(entries));
+    localStorage.setItem('mykasa_custom_types',JSON.stringify(customTypes));
     render();
   }else{
     mirror();
